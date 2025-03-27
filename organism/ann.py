@@ -35,17 +35,29 @@ class Node:
     def getPreAc(self):
         return self.preactivate
 class Layer:
-    def __init__(self, nodecount, prevlayer,layertype='h'):
+    def __init__(self, nodecount, prevlayer,layertype='h', weights=[], biases=[]):
         self.nodecount=nodecount
         self.prevlayer=prevlayer
         self.layertype=layertype
         self.nodes=[]
         self.outputs=[]
         self.base=0
+        self.weightsInputted=weights
+        self.biasesInputted=biases
         if self.prevlayer!=None and self.layertype=='h':
-            for i in range(nodecount):
-                weightli=np.random.randn(len(self.prevlayer.nodes))*np.sqrt(2/len(self.prevlayer.nodes))
-                self.nodes.append(Node(f"node {i}",[0 for node in self.prevlayer.nodes],weightli,0.001))
+            if self.weightsInputted==[] and self.biasesInputted==[]:
+                for i in range(nodecount):
+                    weightli=np.random.randn(len(self.prevlayer.nodes))*np.sqrt(2/len(self.prevlayer.nodes))
+                    self.nodes.append(Node(f"node {i}",[0 for node in self.prevlayer.nodes],weightli,0.001))
+            elif self.weightsInputted==[] and self.biasesInputted!=[]:
+                for i in range(nodecount):
+                    weightli=np.random.randn(len(self.prevlayer.nodes))*np.sqrt(2/len(self.prevlayer.nodes))
+                    self.nodes.append(Node(f"node {i}",[0 for node in self.prevlayer.nodes],weightli,self.biasesInputted[i]))
+            elif self.weightsInputted!=[] and self.biasesInputted==[]:
+                for i in range(nodecount):
+                    self.nodes.append(Node(f"node {i}",[0 for node in self.prevlayer.nodes],self.weightsInputted[i],0.001))
+            else:
+                self.nodes.append(Node(f"node {i}",[0 for node in self.prevlayer.nodes],self.weightsInputted[i],self.biasesInputted[i]))
         elif self.prevlayer!=None and self.layertype=='o':
             for i in range(nodecount):
                 weightli=np.random.randn(len(self.prevlayer.nodes))*np.sqrt(2/len(self.prevlayer.nodes))
@@ -81,14 +93,22 @@ class Layer:
         return self.outputs
     
 class Network:
-    def __init__(self, nodecounts):
+    def __init__(self, nodecounts, weights=[], biases=[]):
         self.nodecounts=nodecounts
         self.layers=[Layer(self.nodecounts[0],None,'i')]
+        self.weightsInputted=weights
+        self.biasesInputted=biases
         for i in range(1,len(nodecounts)):
-            if i!=len(nodecounts)-1:
-                self.layers.append(Layer(nodecounts[i],self.layers[i-1]))
+            if self.weightsInputted!=[] and self.biasesInputted!=[]:
+                if i!=len(nodecounts)-1:
+                    self.layers.append(Layer(nodecounts[i],self.layers[i-1], weights=self.weightsInputted[i-1], biases=self.biasesInputted[i-1]))
+                else:
+                    self.layers.append(Layer(nodecounts[i],self.layers[i-1],layertype='o', weights=self.weightsInputted[i], biases=self.biasesInputted[i]))
             else:
-                self.layers.append(Layer(nodecounts[i],self.layers[i-1],layertype='o'))
+                if i!=len(nodecounts)-1:
+                    self.layers.append(Layer(nodecounts[i],self.layers[i-1]))
+                else:
+                    self.layers.append(Layer(nodecounts[i],self.layers[i-1],layertype='o'))
     def rerun(self, ins=[],update=False):
         for i in range(0,len(self.layers)):
             if self.layers[i].layertype=='i':
@@ -138,7 +158,7 @@ class Network:
                 nodes=self.getNodes()
                 errTerms=[self.getErrTerms(networkOutput,self.layers[len(self.layers)-1].getNodes(),[],[],"out",targets=ylist)]
                 for i in range(len(nodes)-2,0,-1):
-                    errTerms.append(self.getErrTerms(self.layers[i+1].getOutputs(),self.layers[i].getNodes(),self.layers[i+1].getWeights(),errTerms[len(nodes)-i-2],"h"))
+                    errTerms.append(self.getErrTerms(self.layers[i+1].getOutputs(),self.layers[i].getNodes(),self.layers[i+1].getWeights(),errTerms[len(nodes)-i-2],"h")) 
                 errTerms=errTerms[::-1]
 
 
