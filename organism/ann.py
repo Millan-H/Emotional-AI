@@ -98,6 +98,7 @@ class Network:
         self.layers=[Layer(self.nodecounts[0],None,'i')]
         self.weightsInputted=weights
         self.biasesInputted=biases
+        self.output=None
         for i in range(1,len(nodecounts)):
             if self.weightsInputted!=[] and self.biasesInputted!=[]:
                 if i!=len(nodecounts)-1:
@@ -109,12 +110,13 @@ class Network:
                     self.layers.append(Layer(nodecounts[i],self.layers[i-1]))
                 else:
                     self.layers.append(Layer(nodecounts[i],self.layers[i-1],layertype='o'))
-    def rerun(self, ins=[],update=False):
+    def rerun(self, ins=[],update=False, updateRL=False):
         for i in range(0,len(self.layers)):
             if self.layers[i].layertype=='i':
                 self.layers[i].rerun(ins,update)
             else:
                 output=self.layers[i].rerun(self.layers[i].getPrevLayer().getOutputs(),update)
+        self.output=output
         return output
     @staticmethod
     def deriv(x):
@@ -142,17 +144,17 @@ class Network:
     def getConnections(self):
         connections=[layer.getOutputs() for layer in self.layers]
         return connections
-    def train(self, penaltyfactor, data, epochs=4):
+    def train(self, penaltyfactor, data, epochs=4, rl=False):
         for epoch in range(epochs):
             costli=[]
-            ylist=[[0,0,0,0,0,0,0,0,0,0] for i in range(len(data))]
+            ylist=[]
             cost=0
-            for i in range(1000):
-
-                networkOutput=self.rerun(ins=data[i][0],update=True)
+            for i in range(len()):
+                networkOutput=self.output
+                if not rl:
+                    networkOutput=self.rerun(ins=data[i][0],update=True)
                 networkOutputAdjusted=[(max(min(nodeOutput,1-1e-15),1e-15)) for nodeOutput in networkOutput]
-                ylist=[0 for i in range(10)]
-                ylist[data[i][1]]=1
+                ylist=data[i][1]
                 costli.append(-sum([(ylist[i]*np.log(networkOutputAdjusted[i])+(1-ylist[i])*np.log(1-networkOutputAdjusted[i])) for i in range(len(ylist))]))
 
                 nodes=self.getNodes()
@@ -171,6 +173,8 @@ class Network:
                             nodes[i+1][j].updateWeights(k,-1*deltaW)
             mse=sum(costli)/len(costli)
             print(f"\nLoss: {mse}")
+    def getOutput(self):
+        return self.output
     def test(self, data):
         networkOutputs=[]
         correct=0
