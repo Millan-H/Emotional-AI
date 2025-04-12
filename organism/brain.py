@@ -40,6 +40,7 @@ class Organism:
         self.emotion=Network([dataOutputs,128,128,emotionalOutputs])
         self.logic=Network([dataOutputs+emotionalOutputs,128,128,limbs])
         self.memory=Hippocampus()
+        self.evoMem=[]
         self.id=id
         self.living=True
         self.pos=pos
@@ -48,6 +49,8 @@ class Organism:
         emotionalOutput=self.emotion.rerun(pos)
         movementValues=self.logic.rerun([pos,emotionalOutput])
         self.pos=movementValues
+    def getPos(self):
+        return self.pos
     def kill(self):
         self.living=False
         self.memory.update("asdfasdf") #placeholder
