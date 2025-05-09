@@ -14,9 +14,7 @@ class Environment:
     def __init__(self, popStrtCount):
         self.population=popStrtCount
         self.orgs=[]
-        self.successes=[]
-        for i in range(popStrtCount):
-            self.orgs.append(Organism(i,[math.cos(i),math.sin(i)]))
+        self.successes=[Organism(i,[math.cos(i),math.sin(i)]) for i in range(popStrtCount)]
     def evolve(self, epochs):
         for i in range(epochs):
             epochSuccesses=[]
