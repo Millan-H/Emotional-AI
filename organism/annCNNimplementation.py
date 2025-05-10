@@ -93,11 +93,13 @@ class Layer:
         return self.outputs
    
 class Network:
-    def __init__(self, nodecounts, weights=[], biases=[]):
+    def __init__(self, nodecounts, convolutions=0, type='ff', kernelDimensions=[3,3], weights=[], biases=[]):
         self.nodecounts=nodecounts
         self.layers=[Layer(self.nodecounts[0],None,'i')]
         self.weightsInputted=weights
         self.biasesInputted=biases
+        self.kernel=[]
+        self.convolutions=convolutions
         self.output=None
         for i in range(1,len(nodecounts)):
             if self.weightsInputted!=[] and self.biasesInputted!=[]:
@@ -110,7 +112,12 @@ class Network:
                     self.layers.append(Layer(nodecounts[i],self.layers[i-1]))
                 else:
                     self.layers.append(Layer(nodecounts[i],self.layers[i-1],layertype='o'))
+        if type=='cnn':
+            self.kernel=[np.random.normal(0,np.sqrt(2/(3*kernelDimensions[0]*kernelDimensions[1])),size=(3*kernelDimensions[0]*kernelDimensions[1])) for i in range(convolutions)]
     def rerun(self, ins=[],update=False, updateRL=False):
+        if self.type=='cnn':
+            for i in range(self.convolutions):
+                ins=self.convStack(ins,self.kernel[i])
         for i in range(0,len(self.layers)):
             if self.layers[i].layertype=='i':
                 self.layers[i].rerun(ins,update)
@@ -118,6 +125,26 @@ class Network:
                 output=self.layers[i].rerun(self.layers[i].getPrevLayer().getOutputs(),update)
         self.output=output
         return output
+    def convolution(self, data, kernel, padding=0, stride=1):
+        output=[]
+        paddedData=np.pad(data, ((padding, padding), (padding, padding)), 'constant', constant_values=(0, 0))
+        for i in range(len(kernel)//2,len(paddedData)-1):
+            for j in range(len(kernel)//2,len(paddedData[i])-1,stride):
+                output.append(np.sum(data[i-1:i+2][j-1:j+2]*kernel))
+        return output
+    def cnnReLU(self, data):
+        for i in range(len(data)):
+            for j in range(len(data[i])):
+                data[i][j]=max(0,data[i][j])
+        return data
+    def pooling(self, data, poolSize=2, stride=2):
+        output=[]
+        for i in range(0,len(data)-poolSize+1,stride):
+            for j in range(0,len(data[i])-poolSize+1,stride):
+                output.append(np.max(data[i:i+poolSize][j:j+poolSize]))
+        return data
+    def convStack(self, data, kernel, poolSize=2,padding=0, poolStride=2, convStride=1):
+        pass
     @staticmethod
     def deriv(x):
         return 1 if x>0 else 0.1
