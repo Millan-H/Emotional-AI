@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+from annCNNimplementation import Network
 
 class EnvClassifier:
     def __init__(self):
@@ -130,28 +131,35 @@ class EnvClassifier:
                 for k in range(len(masksSpliced[i][j])):
                     maskDict[i][j][k]=False
 
-        objs=[]
+        objCoords=[]
         
         for i in range(len(masks)):
             objNum=0
-            objs.append([])
-            for j in range(0,len(masks[i])-1):
-                for k in range(0,len(masks[i][j])-1):
-
+            objCoords.append([])
+            for j in range(1,len(masks[i])-1):
+                for k in range(1,len(masks[i][j])-1):
                     if masks[i][j][k]==255:
-                        if len(objs[i])==0:
-                            objs[i].append([[j,k]])
+                        if len(objCoords[i])==0:
+                            objCoords[i].append([[j,k]])
                         else:
                             if maskDict[i][j][k-1] or maskDict[i][j-1][k] or maskDict[i][j][k+1] or maskDict[i][j+1][k]:
-                                objs[i][objNum].append([j,k])
+                                objCoords[i][objNum].append([j,k])
                                 maskDict[i][j][k]=True
                             else:
-                                objs[i].append([[j,k]])
+                                objCoords[i].append([[j,k]])
                                 maskDict[i][j][k]=True
                                 objNum+=1
-        print()
+        
+        objs=[[[[[0,0,0] for i in range(len(camDataSpliced[j]))] for j in range(len(camDataSpliced))] for k in range(len(objCoords[l]))] for l in range(len(objCoords))]
+        count=0
+        for i in range(len(objs)):
+            for j in range(len(objs[i])):
+                for m in range(len(objCoords[i][j])):
+                    objs[i][j][objCoords[i][j][m][0]][objCoords[i][j][m][1]]=camDataSpliced[objCoords[i][j][m][0]][objCoords[i][j][m][1]]
+        print(objs)
+        return objs
     def classifyObjs(self, objs):
-        pass
+        network=Network([])
     def classifyEnv(self, envData):
         pass
     def updateObjClassifier(self, trainData):
