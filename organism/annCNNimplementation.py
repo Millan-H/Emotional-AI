@@ -93,14 +93,18 @@ class Layer:
         return self.outputs
    
 class Network:
-    def __init__(self, nodecounts, convolutions=0, type='ff', kernelDimensions=[3,3], weights=[], biases=[]):
+    def __init__(self, nodecounts, convolutions=0, type='ff', maintainDimensions=True, kernelDimensions=[3,3], weights=[], biases=[], name=''):
         self.nodecounts=nodecounts
         self.layers=[Layer(self.nodecounts[0],None,'i')]
         self.weightsInputted=weights
         self.biasesInputted=biases
-        self.kernel=[]
+        self.kernels=[]
         self.convolutions=convolutions
         self.output=None
+        self.type=type
+        self.convOutputs=[]
+        self.maintainDimensions=maintainDimensions
+        self.name=name
         for i in range(1,len(nodecounts)):
             if self.weightsInputted!=[] and self.biasesInputted!=[]:
                 if i!=len(nodecounts)-1:
@@ -116,8 +120,23 @@ class Network:
             self.kernel=[np.random.normal(0,np.sqrt(2/(3*kernelDimensions[0]*kernelDimensions[1])),size=(3*kernelDimensions[0]*kernelDimensions[1])) for i in range(convolutions)]
     def rerun(self, ins=[],update=False, updateRL=False):
         if self.type=='cnn':
-            for i in range(self.convolutions):
-                ins=self.convStack(ins,self.kernel[i])
+            insR=[ins[i][j][0] for i in range(len(ins)) for j in range(len(ins[i]))]
+            insG=[ins[i][j][1] for i in range(len(ins)) for j in range(len(ins[i]))]
+            insB=[ins[i][j][2] for i in range(len(ins)) for j in range(len(ins[i]))]
+            self.convOutput=[[insR,insG,insB]]
+            for kernel in self.kernels:
+                insR=self.convStack(insR,kernel[0])
+                insG=self.convStack(insG,kernel[1])
+                insB=self.convStack(insB,kernel[2])
+                self.convOutput.append([insR,insG,insB])
+            
+            ins=[]
+            for i in range(len(insR)):
+                for j in range(len(insR[i])):
+                    ins.append(insR[i][j])
+                    ins.append(insG[i][j])
+                    ins.append(insB[i][j])
+
         for i in range(0,len(self.layers)):
             if self.layers[i].layertype=='i':
                 self.layers[i].rerun(ins,update)
@@ -130,7 +149,8 @@ class Network:
         paddedData=np.pad(data, ((padding, padding), (padding, padding)), 'constant', constant_values=(0, 0))
         for i in range(len(kernel)//2,len(paddedData)-1):
             for j in range(len(kernel)//2,len(paddedData[i])-1,stride):
-                output.append(np.sum(data[i-1:i+2][j-1:j+2]*kernel))
+                region = [row[j-1:j+len(kernel)-1] for row in data[i-1:i+len(kernel)-1]]
+                output.append(np.sum(np.array(region)*np.array(kernel)))
         return output
     def cnnReLU(self, data):
         for i in range(len(data)):
@@ -139,12 +159,18 @@ class Network:
         return data
     def pooling(self, data, poolSize=2, stride=2):
         output=[]
-        for i in range(0,len(data)-poolSize+1,stride):
-            for j in range(0,len(data[i])-poolSize+1,stride):
-                output.append(np.max(data[i:i+poolSize][j:j+poolSize]))
+        for i in range(0, len(data)-poolSize+1, stride):
+            for j in range(0, len(data[0])-poolSize+1, stride):
+                region = [row[j:j+poolSize] for row in data[i:i+poolSize]]
+                output.append(np.max(region))
         return data
-    def convStack(self, data, kernel, poolSize=2,padding=0, poolStride=2, convStride=1):
-        pass
+    def convStack(self, data, kernel, poolSize=2, padding=0, poolStride=2, convStride=1):
+        if self.maintainDimensions:
+            padding=(len(kernel))//2
+        convoluted=self.convolution(data,kernel,padding=padding,stride=convStride)
+        relued=self.cnnReLU(convoluted)
+        pooled=self.pooling(relued,poolSize=poolSize,stride=poolStride)
+        return pooled
     @staticmethod
     def deriv(x):
         return 1 if x>0 else 0.1
@@ -171,6 +197,24 @@ class Network:
     def getConnections(self):
         connections=[layer.getOutputs() for layer in self.layers]
         return connections
+    def getKernelGrads(self, data, errTerms, connections, kernel):
+        rWs=[]
+        rHs=[]
+        for i in range(1,len(errTerms)+1):
+            if (len(errTerms)/i)%1==0:
+                rWs.append(max(i,len(errTerms)/i))
+                rHs.append(min(i,len(errTerms)/i))
+        diffs=[]
+        for i in range(len(rWs)):
+            diffs.append(abs(rWs[i]-rHs[i]))
+        rW=rWs[diffs.index(min(diffs))]
+        rH=rHs[diffs.index(min(diffs))]
+        neededGrads=np.array(np.array(errTerms)*np.array(connections)).reshape(rH,rW)
+        paddingVal=((len(kernel)+len(data)-1)-len(neededGrads))//2
+        kernelGrads=self.convolution(neededGrads,kernel,padding=paddingVal)
+        return kernelGrads
+    def getName(self):
+        return self.name
     def train(self, penaltyfactor, data, epochs=4, rl=False):
         for epoch in range(epochs):
             costli=[]
@@ -181,9 +225,9 @@ class Network:
                 if not rl:
                     networkOutput=self.rerun(ins=data[i][0],update=True)
                 networkOutputAdjusted=[(max(min(nodeOutput,1-1e-15),1e-15)) for nodeOutput in networkOutput]
-                ylist=data[i][1]
+                ylist=[0 for i in range(len(networkOutput))]
+                ylist[data[i][1]-1]=1
                 costli.append(-sum([(ylist[i]*np.log(networkOutputAdjusted[i])+(1-ylist[i])*np.log(1-networkOutputAdjusted[i])) for i in range(len(ylist))]))
-
 
                 nodes=self.getNodes()
                 errTerms=[self.getErrTerms(networkOutput,self.layers[len(self.layers)-1].getNodes(),[],[],"out",targets=ylist)]
@@ -191,8 +235,7 @@ class Network:
                     errTerms.append(self.getErrTerms(self.layers[i+1].getOutputs(),self.layers[i].getNodes(),self.layers[i+1].getWeights(),errTerms[len(nodes)-i-2],"h"))
                 errTerms=errTerms[::-1]
 
-
-
+                print(errTerms)
 
                 for i in range(len(errTerms)):
                     for j in range(len(errTerms[i])):
@@ -201,6 +244,11 @@ class Network:
                         for k in range(len(nodes[i])):
                             deltaW=penaltyfactor*errTerms[i][j]*self.getConnections()[i][k]
                             nodes[i+1][j].updateWeights(k,-1*deltaW)
+                if self.type=='cnn':
+                    for i in range(len(self.kernels)):
+                        for j in range(len(self.kernels[i])):
+                           kernelGrads=self.getKernelGrads(self.convOutputs[i][j],errTerms[0],self.getConnections()[0],self.kernels[i][j],padding=0,stride=1)
+                           self.kernels[i][j]=self.kernels[i][j]-penaltyfactor*kernelGrads
             mse=sum(costli)/len(costli)
     def getOutput(self):
         return self.output
