@@ -1,10 +1,21 @@
 import cv2
 import numpy as np
-from annCNNimplementation import Network
+import sys
+import os
+import math
+
+# Add the project root directory to the path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)  # Project root
+sys.path.append(parent_dir)
+
+# Now import using the directory structure
+from organism.annCNNimplementation import Network
 
 class EnvClassifier:
     def __init__(self):
-        pass
+        self.knownObjs=[]
+        self.envs=[]
     def getObjs(self, camData, rangeOfVisionPx):
         camDataBW=[]
         for i in range(len(camData)):
@@ -158,14 +169,35 @@ class EnvClassifier:
                     objs[i][j][objCoords[i][j][m][0]][objCoords[i][j][m][1]]=camDataSpliced[objCoords[i][j][m][0]][objCoords[i][j][m][1]]
         print(objs)
         return objs
-    def classifyObjs(self, objs):
-        network=Network([])
-    def classifyEnv(self, envData):
-        pass
-    def updateObjClassifier(self, trainData):
-        pass
-    def updateEnvClassifier(self, trainData):
-        pass
+    def classifyObjs(self, objs, undeterimedCuttoff):
+        if len(self.knownObjs)==0:
+            self.knownObjs.append([objs[0][0]])
+        classifier=Network([784, 128, 128, 128, len(self.knownObjs)], 8, 'cnn')
+        objVector=[0 for i in range(len(self.knownObjs))]
+        for mask in objs:
+            for obj in range(len(mask)):
+                objConfidence=classifier.rerun(obj)
+                if max(objConfidence)<=undeterimedCuttoff:
+                    self.knownObjs.append([obj])
+                    classifier.train(0.05,self.knownObjs,20)
+                else:
+                    objClassified=objConfidence.index(max(objConfidence))
+                    self.knownObjs[objClassified].append(obj)
+                    objVector[objClassified]+=1
+        return objVector
+    def classifyEnv(self, objVector, undeterimedCuttoff):
+        envClassifier=Network([len(self.knownObjs),128,128,len(self.envs)])
+        if len(self.envs)==0:
+            self.envs.append([objVector])
+        envConfidence=envClassifier.rerun(objVector)
+        envMax=max(envConfidence)
+        if envMax<=undeterimedCuttoff:
+            self.envs.append([objVector])
+            return len(envConfidence)
+        else:
+            env=envConfidence.index(envMax)
+            self.envs[env].append(objVector)
+            return env
 
 redBox = [
     [255, 255, 247], [255, 255, 248], [255, 250, 250], [252, 246, 255], [255, 245, 255], [255, 253, 255], [255, 254, 249], [255, 245, 255], [253, 255, 255], [245, 255, 255], [255, 255, 255], [255, 255, 247], [249, 251, 255], [255, 246, 255], [255, 247, 249], [255, 255, 252], [255, 253, 253], [245, 246, 247], [255, 255, 255], [254, 251, 246], [255, 252, 246], [255, 250, 255], [254, 255, 250], [245, 248, 255], [249, 255, 255], [255, 253, 255], [245, 253, 253], [251, 255, 252],

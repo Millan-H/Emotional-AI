@@ -93,7 +93,7 @@ class Layer:
         return self.outputs
    
 class Network:
-    def __init__(self, nodecounts, convolutions=0, type='ff', maintainDimensions=True, kernelDimensions=[3,3], weights=[], biases=[]):
+    def __init__(self, nodecounts, convolutions=0, type='ff', maintainDimensions=True, kernelDimensions=[3,3], weights=[], biases=[], name=''):
         self.nodecounts=nodecounts
         self.layers=[Layer(self.nodecounts[0],None,'i')]
         self.weightsInputted=weights
@@ -104,6 +104,7 @@ class Network:
         self.type=type
         self.convOutputs=[]
         self.maintainDimensions=maintainDimensions
+        self.name=name
         for i in range(1,len(nodecounts)):
             if self.weightsInputted!=[] and self.biasesInputted!=[]:
                 if i!=len(nodecounts)-1:
@@ -212,7 +213,8 @@ class Network:
         paddingVal=((len(kernel)+len(data)-1)-len(neededGrads))//2
         kernelGrads=self.convolution(neededGrads,kernel,padding=paddingVal)
         return kernelGrads
-        
+    def getName(self):
+        return self.name
     def train(self, penaltyfactor, data, epochs=4, rl=False):
         for epoch in range(epochs):
             costli=[]
