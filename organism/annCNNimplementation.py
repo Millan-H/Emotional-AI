@@ -215,6 +215,46 @@ class Network:
         return kernelGrads
     def getName(self):
         return self.name
+    def ddgp(self, discountFactor, rewardValue, qFunction, qTarg, actorNetwork, policyNetwork, policyOutput, state, targetEta):
+        actorOutput=actorNetwork.rerun(state)
+        qFuncOutput=qFunction.rerun([state,policyOutput])
+        qFuncMax=qTarg.rerun([state,actorOutput])
+        qFuncBellman=rewardValue+discountFactor*qFuncMax
+        qFuncLoss=(qFuncOutput-qFuncBellman)**2
+        qFuncGrads=qFunction.getGrad([state,policyOutput])        
+
+        for i in range(len(qFunction.getWeights())):
+            for j in range(len(qFunction.getWeights()[i])):
+                for k in range(len(qFunction.getWeights()[i][j])):
+                    qTarg.getWeights()[i][j][k]=targetEta*qTarg.getWeights()[i][j][k]+(1-targetEta)*qFunction.getWeights()[i][j][k]
+        
+        for i in range(len(policyNetwork.getWeights())):
+            for j in range(len(policyNetwork.getWeights()[i])):
+                for k in range(len(policyNetwork.getWeights()[i][j])):
+                    actorNetwork.getWeights()[i][j][k]=targetEta*actorNetwork.getWeights()[i][j][k]+(1-targetEta)*policyNetwork.getWeights()[i][j][k]
+
+
+    def getGrad(self, data):
+        networkOutput=self.rerun(ins=data[0],update=True)
+        networkOutputAdjusted=[(max(min(nodeOutput,1-1e-15),1e-15)) for nodeOutput in networkOutput]
+        ylist=[0 for i in range(len(networkOutput))]
+        ylist[data[i][1]-1]=1
+
+        nodes=self.getNodes()
+        errTerms=[self.getErrTerms(networkOutput,self.layers[len(self.layers)-1].getNodes(),[],[],"out",targets=ylist)]
+        for i in range(len(nodes)-2,0,-1):
+            errTerms.append(self.getErrTerms(self.layers[i+1].getOutputs(),self.layers[i].getNodes(),self.layers[i+1].getWeights(),errTerms[len(nodes)-i-2],"h"))
+        errTerms=errTerms[::-1]
+        gradList=[]
+        for i in range(len(errTerms)):
+            gradList.append([])
+            for j in range(len(errTerms[i])):
+                gradList[i].append([])
+                for k in range(len(nodes[i])):
+                    gradList[i][j]=-1*errTerms[i][j]*self.getConnections()[i][k]
+        
+    def ddgpTrain(self, gradValue):
+        pass
     def train(self, penaltyfactor, data, epochs=4, rl=False):
         for epoch in range(epochs):
             costli=[]
@@ -234,8 +274,6 @@ class Network:
                 for i in range(len(nodes)-2,0,-1):
                     errTerms.append(self.getErrTerms(self.layers[i+1].getOutputs(),self.layers[i].getNodes(),self.layers[i+1].getWeights(),errTerms[len(nodes)-i-2],"h"))
                 errTerms=errTerms[::-1]
-
-                print(errTerms)
 
                 for i in range(len(errTerms)):
                     for j in range(len(errTerms[i])):
