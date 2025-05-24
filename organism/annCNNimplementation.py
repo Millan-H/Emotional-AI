@@ -316,3 +316,20 @@ class Network:
         print(f"\nCorrect: {correct}")
         print(f"Incorrect: {incorrect}")
         print(f"Accuracy: {correct/total*100}%")
+
+class Transformer:
+    def __init__(self, headCount,dModel):
+        self.ff=Network([1,2,1])
+        self.dModel=dModel
+        self.q=[np.uniform(-1*dModel,dModel) for i in range(dModel)]
+        self.k=[np.uniform(-1*dModel,dModel) for i in range(dModel)]
+        self.v=[np.uniform(-1*dModel,dModel) for i in range(dModel)]
+    def softmax(self, index, data):
+        return np.exp(data[index])/np.sum(np.exp(data))
+    def run(self, input, q, k, v, mask):
+        qT=np.matmul(input,q)
+        kT=np.matmul(input,k)
+        vT=np.matmul(input,v)
+        qkMatMul=np.matmul(qT,kT)
+        softmaxed=[self.softmax((qkMatMul)/np.sqrt(self.dModel),i) for i in range(len(qkMatMul))]
+        qkv=np.matmul(softmaxed,vT)
