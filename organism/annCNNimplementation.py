@@ -194,9 +194,11 @@ class Network:
                 sums=[errtermsnext[j]*weightsnext[j][i] for j in range(len(errtermsnext))]
                 errtermsli.append(sum(sums)*self.deriv(nodes[i].getPreAc()))
         return errtermsli
+    
     def getConnections(self):
         connections=[layer.getOutputs() for layer in self.layers]
         return connections
+    
     def getKernelGrads(self, data, errTerms, connections, kernel):
         rWs=[]
         rHs=[]
@@ -213,8 +215,57 @@ class Network:
         paddingVal=((len(kernel)+len(data)-1)-len(neededGrads))//2
         kernelGrads=self.convolution(neededGrads,kernel,padding=paddingVal)
         return kernelGrads
+    
     def getName(self):
         return self.name
+    
+    def ddgp(self, discountFactor, rewardValue, qFunction, qTarg, actorNetwork, policyNetwork, policyOutput, state, targetEta):
+        actorOutput=actorNetwork.rerun(state)
+        qFuncOutput=qFunction.rerun([state,policyOutput])
+        qFuncMax=qTarg.rerun([state,actorOutput])
+        qFuncBellman=rewardValue+discountFactor*qFuncMax
+        qFuncLoss=(qFuncOutput-qFuncBellman)**2
+        qFuncGrads=qFunction.getGrad([state,policyOutput])
+        qFuncGradsPolicy=qFunction.getGrad([state,actorOutput],ylist=False)
+        for i in range(len(qFunction.getWeights())):
+            for j in range(len(qFunction.getWeights()[i])):
+                for k in range(len(qFunction.getWeights()[i][j])):
+                    qTarg.getWeights()[i][j][k]=targetEta*qTarg.getWeights()[i][j][k]+(1-targetEta)*qFunction.getWeights()[i][j][k]
+        for i in range(len(policyNetwork.getWeights())):
+            for j in range(len(policyNetwork.getWeights()[i])):
+                for k in range(len(policyNetwork.getWeights()[i][j])):
+                    actorNetwork.getWeights()[i][j][k]=targetEta*actorNetwork.getWeights()[i][j][k]+(1-targetEta)*policyNetwork.getWeights()[i][j][k]
+        qFunction.backpropFromGrads(qFuncGrads)
+        policyNetwork.backpropFromGrads(qFuncGradsPolicy)
+
+    def backpropFromGrads(self, grads):
+        for i in range(len(grads)):
+            for j in range(len(grads[i])):
+                for k in range(len(grads[i][j])):
+                    self.layers[i+1].getNodes()[j].updateWeights(k,grads[i][j][k])
+                    self.layers[i+1].getNodes()[j].updateBias(grads[i][j][k]/self.getConnections()[i][j])
+
+    def getGrad(self, data, ylistImplemented=True):
+        networkOutput=self.rerun(ins=data[0],update=True)
+        networkOutputAdjusted=[(max(min(nodeOutput,1-1e-15),1e-15)) for nodeOutput in networkOutput]
+        ylist=[]
+        if ylistImplemented:
+            ylist=[0 for i in range(len(networkOutput))]
+            ylist[data[i][1]-1]=1
+
+        nodes=self.getNodes()
+        errTerms=[self.getErrTerms(networkOutput,self.layers[len(self.layers)-1].getNodes(),[],[],"out",targets=(ylist))]
+        for i in range(len(nodes)-2,0,-1):
+            errTerms.append(self.getErrTerms(self.layers[i+1].getOutputs(),self.layers[i].getNodes(),self.layers[i+1].getWeights(),errTerms[len(nodes)-i-2],"h"))
+        errTerms=errTerms[::-1]
+        gradList=[]
+        for i in range(len(errTerms)):
+            gradList.append([])
+            for j in range(len(errTerms[i])):
+                gradList[i].append([])
+                for k in range(len(nodes[i])):
+                    gradList[i][j].append(-1*errTerms[i][j]*self.getConnections()[i][k])
+        return gradList
     def train(self, penaltyfactor, data, epochs=4, rl=False):
         for epoch in range(epochs):
             costli=[]
@@ -234,8 +285,6 @@ class Network:
                 for i in range(len(nodes)-2,0,-1):
                     errTerms.append(self.getErrTerms(self.layers[i+1].getOutputs(),self.layers[i].getNodes(),self.layers[i+1].getWeights(),errTerms[len(nodes)-i-2],"h"))
                 errTerms=errTerms[::-1]
-
-                print(errTerms)
 
                 for i in range(len(errTerms)):
                     for j in range(len(errTerms[i])):
@@ -267,3 +316,20 @@ class Network:
         print(f"\nCorrect: {correct}")
         print(f"Incorrect: {incorrect}")
         print(f"Accuracy: {correct/total*100}%")
+
+class Transformer:
+    def __init__(self, headCount,dModel):
+        self.ff=Network([1,2,1])
+        self.dModel=dModel
+        self.q=[np.uniform(-1*dModel,dModel) for i in range(dModel)]
+        self.k=[np.uniform(-1*dModel,dModel) for i in range(dModel)]
+        self.v=[np.uniform(-1*dModel,dModel) for i in range(dModel)]
+    def softmax(self, index, data):
+        return np.exp(data[index])/np.sum(np.exp(data))
+    def run(self, input, q, k, v, mask):
+        qT=np.matmul(input,q)
+        kT=np.matmul(input,k)
+        vT=np.matmul(input,v)
+        qkMatMul=np.matmul(qT,kT)
+        softmaxed=[self.softmax((qkMatMul)/np.sqrt(self.dModel),i) for i in range(len(qkMatMul))]
+        qkv=np.matmul(softmaxed,vT)

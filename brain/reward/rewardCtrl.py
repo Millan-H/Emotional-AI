@@ -14,11 +14,11 @@ from organism.annCNNimplementation import Network
 from planning.pfc import PFC
 
 class RewardController:
-    def __init__(self, inVectorLength, discount, baseEmotionCount):
+    def __init__(self, inVectorLength, discountFactor, baseEmotionCount):
         self.inVectorLength=inVectorLength
         self.emotions=[Network([self.inVectorLength,128,128,1],name=0)]
         self.weightList=[1]
-        self.discount=-1*discount
+        self.discountFactor=-1*discountFactor
         self.prevReaction=0
         self.reaction=0
         self.reactionStorage=[[]]
@@ -32,7 +32,7 @@ class RewardController:
         reaction=0
         for i in range(len(self.emotions)-1,-1,-1):
             goalReaction=self.emotions[i].rerun(stimuliVector)
-            reaction+=(i**self.discount)*goalReaction
+            reaction+=(i**self.discountFactor)*goalReaction
             self.reactionStorage[i].append(goalReaction)
 
         self.prevReaction=self.reaction
