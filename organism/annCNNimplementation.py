@@ -93,7 +93,7 @@ class Layer:
         return self.outputs
    
 class Network:
-    def __init__(self, nodecounts, convolutions=0, type='ff', maintainDimensions=True, kernelDimensions=[3,3], weights=[], biases=[], name=''):
+    def __init__(self, nodecounts, convolutions=0, type='ff', maintainDimensions=True, adam=True, kernelDimensions=[3,3], weights=[], biases=[], name=''):
         self.nodecounts=nodecounts
         self.layers=[Layer(self.nodecounts[0],None,'i')]
         self.weightsInputted=weights
@@ -105,6 +105,12 @@ class Network:
         self.convOutputs=[]
         self.maintainDimensions=maintainDimensions
         self.name=name
+        self.adam=adam
+        if adam:
+            self.momentumsW=[[[0 for k in range(len(self.nodecounts[i-1]))] for j in range(len(nodecounts[i]))] for i in range(1,len(self.nodecounts))]
+            self.varsW=[[[0 for k in range(len(self.nodecounts[i-1]))] for j in range(len(nodecounts[i]))] for i in range(1,len(self.nodecounts))]
+            self.momentumsB=[[0 for j in range(len(nodecounts[i]))] for i in range(1,len(self.nodecounts))]
+            self.varsB=[[0 for j in range(len(nodecounts[i]))] for i in range(1,len(self.nodecounts))]
         for i in range(1,len(nodecounts)):
             if self.weightsInputted!=[] and self.biasesInputted!=[]:
                 if i!=len(nodecounts)-1:
@@ -266,7 +272,7 @@ class Network:
                 for k in range(len(nodes[i])):
                     gradList[i][j].append(-1*errTerms[i][j]*self.getConnections()[i][k])
         return gradList
-    def train(self, penaltyfactor, data, epochs=4, rl=False):
+    def train(self, data, penaltyfactor=0.01, beta1=0, beta2=0, epochs=4, rl=False):
         for epoch in range(epochs):
             costli=[]
             ylist=[]
@@ -288,10 +294,20 @@ class Network:
 
                 for i in range(len(errTerms)):
                     for j in range(len(errTerms[i])):
-                        deltaB=penaltyfactor*errTerms[i][j]
+                        if self.adam:
+                            self.momentums[i][j][k]=beta1*self.momentums[i][j][k]+(1-beta1)*errTerms[i][j]
+                            self.vars[i][j][k]=beta2*self.vars[i][j][k]+(1-beta2)*(errTerms[i][j])**2
+                            deltaB=penaltyfactor*self.momentums[i][j][k]/(np.sqrt(self.vars[i][j][k])+1e-8)
+                        else:
+                            deltaB=penaltyfactor*errTerms[i][j]
                         nodes[i+1][j].updateBias(-1*deltaB)
                         for k in range(len(nodes[i])):
-                            deltaW=penaltyfactor*errTerms[i][j]*self.getConnections()[i][k]
+                            if self.adam:
+                                self.momentumsW[i][j][k]=beta1*self.momentums[i][j][k]+(1-beta1)*errTerms[i][j]*self.getConnections()[i][k]
+                                self.varsW[i][j][k]=beta2*self.vars[i][j][k]+(1-beta2)*(errTerms[i][j]*self.getConnections()[i][k])**2
+                                deltaW=penaltyfactor*self.momentumsW[i][j][k]/(np.sqrt(self.varsW[i][j][k])+1e-8)
+                            else:
+                                deltaW=penaltyfactor*errTerms[i][j]*self.getConnections()[i][k]
                             nodes[i+1][j].updateWeights(k,-1*deltaW)
                 if self.type=='cnn':
                     for i in range(len(self.kernels)):
@@ -318,12 +334,12 @@ class Network:
         print(f"Accuracy: {correct/total*100}%")
 
 class Transformer:
-    def __init__(self, headCount,dModel):
+    def __init__(self, contextWindow, dModel):
         self.ff=Network([1,2,1])
         self.dModel=dModel
-        self.q=[np.uniform(-1*dModel,dModel) for i in range(dModel)]
-        self.k=[np.uniform(-1*dModel,dModel) for i in range(dModel)]
-        self.v=[np.uniform(-1*dModel,dModel) for i in range(dModel)]
+        self.q=[[np.uniform(-1*dModel,dModel) for j in range(dModel)] for i in range(contextWindow)]
+        self.k=[[np.uniform(-1*dModel,dModel) for j in range(dModel)] for i in range(contextWindow)]
+        self.v=[[np.uniform(-1*dModel,dModel) for j in range(dModel)] for i in range(contextWindow)]
     def softmax(self, index, data):
         return np.exp(data[index])/np.sum(np.exp(data))
     def run(self, input, q, k, v, mask):
