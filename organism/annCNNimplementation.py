@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pickle
        
 class Node:
     def __init__(self, name, connections, weights, bias, type="h"):
@@ -24,7 +25,7 @@ class Node:
             return val
         else:
             if update:
-                self.connections=connections
+                self.connections=np.array(connections).flatten()
             return self.connections
     def activate(self, val):
         return max(0.1*val,val)
@@ -76,6 +77,7 @@ class Layer:
         return self.base
     def rerun(self, connections=[],update=False):
         outputs=[]
+        connections=np.array(connections).flatten()
         if self.layertype=='i':
             outputs=[self.nodes[i].fire(connections[i],update) for i in range(len(connections))]
         elif self.layertype=='o':
@@ -93,7 +95,7 @@ class Layer:
         return self.outputs
    
 class Network:
-    def __init__(self, nodecounts, convolutions=0, type='ff', maintainDimensions=True, kernelDimensions=[3,3], weights=[], biases=[], name=''):
+    def __init__(self, nodecounts, convolutions=0, type='ff', maintainDimensions=True, adam=True, kernelDimensions=[3,3], weights=[], biases=[], name=''):
         self.nodecounts=nodecounts
         self.layers=[Layer(self.nodecounts[0],None,'i')]
         self.weightsInputted=weights
@@ -105,6 +107,13 @@ class Network:
         self.convOutputs=[]
         self.maintainDimensions=maintainDimensions
         self.name=name
+        self.adam=adam
+        self.convCount=0
+        if adam:
+            self.momentumsW=[[[0 for k in range(self.nodecounts[i-1])] for j in range(nodecounts[i])] for i in range(1,len(self.nodecounts))]
+            self.varsW=[[[0 for k in range(self.nodecounts[i-1])] for j in range(nodecounts[i])] for i in range(1,len(self.nodecounts))]
+            self.momentumsB=[[0 for j in range(nodecounts[i])] for i in range(1,len(self.nodecounts))]
+            self.varsB=[[0 for j in range(nodecounts[i])] for i in range(1,len(self.nodecounts))]
         for i in range(1,len(nodecounts)):
             if self.weightsInputted!=[] and self.biasesInputted!=[]:
                 if i!=len(nodecounts)-1:
@@ -117,26 +126,26 @@ class Network:
                 else:
                     self.layers.append(Layer(nodecounts[i],self.layers[i-1],layertype='o'))
         if type=='cnn':
-            self.kernel=[np.random.normal(0,np.sqrt(2/(3*kernelDimensions[0]*kernelDimensions[1])),size=(3*kernelDimensions[0]*kernelDimensions[1])) for i in range(convolutions)]
+            self.kernels=[[[[np.random.normal(0,np.sqrt(2/(3*kernelDimensions[0]*kernelDimensions[1]))) for l in range(kernelDimensions[1])] for k in range(kernelDimensions[0])] for j in range(3)] for i in range(convolutions)]
     def rerun(self, ins=[],update=False, updateRL=False):
         if self.type=='cnn':
-            insR=[ins[i][j][0] for i in range(len(ins)) for j in range(len(ins[i]))]
-            insG=[ins[i][j][1] for i in range(len(ins)) for j in range(len(ins[i]))]
-            insB=[ins[i][j][2] for i in range(len(ins)) for j in range(len(ins[i]))]
-            self.convOutput=[[insR,insG,insB]]
+            insR=[[ins[i][j][0] for j in range(len(ins[i]))] for i in range(len(ins))]
+            insG=[[ins[i][j][1] for j in range(len(ins[i]))] for i in range(len(ins))]
+            insB=[[ins[i][j][2] for j in range(len(ins[i]))] for i in range(len(ins))]
+            self.convOutputs=[[insR,insG,insB]]
+            self.convCount=0
             for kernel in self.kernels:
                 insR=self.convStack(insR,kernel[0])
                 insG=self.convStack(insG,kernel[1])
                 insB=self.convStack(insB,kernel[2])
-                self.convOutput.append([insR,insG,insB])
-            
+                self.convOutputs.append([insR,insG,insB])
+                self.convCount+=1
             ins=[]
             for i in range(len(insR)):
                 for j in range(len(insR[i])):
                     ins.append(insR[i][j])
                     ins.append(insG[i][j])
                     ins.append(insB[i][j])
-
         for i in range(0,len(self.layers)):
             if self.layers[i].layertype=='i':
                 self.layers[i].rerun(ins,update)
@@ -147,29 +156,34 @@ class Network:
     def convolution(self, data, kernel, padding=0, stride=1):
         output=[]
         paddedData=np.pad(data, ((padding, padding), (padding, padding)), 'constant', constant_values=(0, 0))
-        for i in range(len(kernel)//2,len(paddedData)-1):
-            for j in range(len(kernel)//2,len(paddedData[i])-1,stride):
-                region = [row[j-1:j+len(kernel)-1] for row in data[i-1:i+len(kernel)-1]]
-                output.append(np.sum(np.array(region)*np.array(kernel)))
+        for i in range(len(kernel)//2,len(paddedData)-len(kernel)//2):
+            output.append([])
+            for j in range(len(kernel)//2,len(paddedData[i])-len(kernel)//2,stride):
+                region=[row[j-len(kernel)//2:j+len(kernel)//2+1] for row in paddedData[i-1:i+len(kernel)-1]]
+                output[i-len(kernel)//2].append(np.sum(np.array(region)*np.array(kernel)))
         return output
     def cnnReLU(self, data):
         for i in range(len(data)):
             for j in range(len(data[i])):
                 data[i][j]=max(0,data[i][j])
         return data
-    def pooling(self, data, poolSize=2, stride=2):
+    def pooling(self, data, poolSize, padding, stride):
         output=[]
-        for i in range(0, len(data)-poolSize+1, stride):
-            for j in range(0, len(data[0])-poolSize+1, stride):
-                region = [row[j:j+poolSize] for row in data[i:i+poolSize]]
-                output.append(np.max(region))
-        return data
-    def convStack(self, data, kernel, poolSize=2, padding=0, poolStride=2, convStride=1):
+        paddedData=np.pad(data, ((padding, padding), (padding, padding)), 'constant', constant_values=(0, 0))
+        for i in range(0, len(paddedData)-poolSize+1, stride):
+            output.append([])
+            for j in range(0, len(paddedData[0])-poolSize+1, stride):
+                region = [row[j:j+poolSize] for row in paddedData[i:i+poolSize]]
+                output[i//stride].append(np.max(region))
+        return output
+    def convStack(self, data, kernel, poolSize=3, padding=0, poolStride=1, convStride=1):
+        poolPadding=padding
         if self.maintainDimensions:
             padding=(len(kernel))//2
+            poolPadding=poolSize//2
         convoluted=self.convolution(data,kernel,padding=padding,stride=convStride)
         relued=self.cnnReLU(convoluted)
-        pooled=self.pooling(relued,poolSize=poolSize,stride=poolStride)
+        pooled=self.pooling(relued,poolSize=poolSize, padding=poolPadding, stride=poolStride)
         return pooled
     @staticmethod
     def deriv(x):
@@ -211,7 +225,7 @@ class Network:
             diffs.append(abs(rWs[i]-rHs[i]))
         rW=rWs[diffs.index(min(diffs))]
         rH=rHs[diffs.index(min(diffs))]
-        neededGrads=np.array(np.array(errTerms)*np.array(connections)).reshape(rH,rW)
+        neededGrads=np.array(np.array(errTerms)*np.array(connections)).reshape(int(rH),int(rW))
         paddingVal=((len(kernel)+len(data)-1)-len(neededGrads))//2
         kernelGrads=self.convolution(neededGrads,kernel,padding=paddingVal)
         return kernelGrads
@@ -226,7 +240,7 @@ class Network:
         qFuncBellman=rewardValue+discountFactor*qFuncMax
         qFuncLoss=(qFuncOutput-qFuncBellman)**2
         qFuncGrads=qFunction.getGrad([state,policyOutput])
-        qFuncGradsPolicy=qFunction.getGrad([state,actorOutput],ylist=False)
+        qFuncGradsPolicy=qFunction.getGrad([state,actorOutput],ylistImplemented =False)
         for i in range(len(qFunction.getWeights())):
             for j in range(len(qFunction.getWeights()[i])):
                 for k in range(len(qFunction.getWeights()[i][j])):
@@ -266,7 +280,7 @@ class Network:
                 for k in range(len(nodes[i])):
                     gradList[i][j].append(-1*errTerms[i][j]*self.getConnections()[i][k])
         return gradList
-    def train(self, penaltyfactor, data, epochs=4, rl=False):
+    def train(self, data, penaltyfactor=0.01, beta1=0.9, beta2=0.999, epochs=4, rl=False):
         for epoch in range(epochs):
             costli=[]
             ylist=[]
@@ -274,11 +288,12 @@ class Network:
             for i in range(len(data)):
                 networkOutput=self.output
                 if not rl:
-                    networkOutput=self.rerun(ins=data[i][0],update=True)
+                    networkOutput=self.rerun(ins=data[i][1],update=True)
                 networkOutputAdjusted=[(max(min(nodeOutput,1-1e-15),1e-15)) for nodeOutput in networkOutput]
                 ylist=[0 for i in range(len(networkOutput))]
-                ylist[data[i][1]-1]=1
+                ylist[data[i][0]]=1
                 costli.append(-sum([(ylist[i]*np.log(networkOutputAdjusted[i])+(1-ylist[i])*np.log(1-networkOutputAdjusted[i])) for i in range(len(ylist))]))
+                print('Epoch:', epoch+1, 'Sample:', i+1, 'Cost:', costli[-1])
 
                 nodes=self.getNodes()
                 errTerms=[self.getErrTerms(networkOutput,self.layers[len(self.layers)-1].getNodes(),[],[],"out",targets=ylist)]
@@ -288,17 +303,28 @@ class Network:
 
                 for i in range(len(errTerms)):
                     for j in range(len(errTerms[i])):
-                        deltaB=penaltyfactor*errTerms[i][j]
+                        if self.adam:
+                            self.momentumsB[i][j]=beta1*self.momentumsB[i][j]+(1-beta1)*errTerms[i][j]
+                            self.varsB[i][j]=beta2*self.varsB[i][j]+(1-beta2)*(errTerms[i][j])**2
+                            deltaB=penaltyfactor*self.momentumsB[i][j]/(np.sqrt(self.varsB[i][j])+1e-8)
+                        else:
+                            deltaB=penaltyfactor*errTerms[i][j]
                         nodes[i+1][j].updateBias(-1*deltaB)
                         for k in range(len(nodes[i])):
-                            deltaW=penaltyfactor*errTerms[i][j]*self.getConnections()[i][k]
+                            if self.adam:
+                                self.momentumsW[i][j][k]=beta1*self.momentumsW[i][j][k]+(1-beta1)*errTerms[i][j]*self.getConnections()[i][k]
+                                self.varsW[i][j][k]=beta2*self.varsW[i][j][k]+(1-beta2)*(errTerms[i][j]*self.getConnections()[i][k])**2
+                                deltaW=penaltyfactor*self.momentumsW[i][j][k]/(np.sqrt(self.varsW[i][j][k])+1e-8)
+                            else:
+                                deltaW=penaltyfactor*errTerms[i][j]*self.getConnections()[i][k]
                             nodes[i+1][j].updateWeights(k,-1*deltaW)
                 if self.type=='cnn':
                     for i in range(len(self.kernels)):
                         for j in range(len(self.kernels[i])):
-                           kernelGrads=self.getKernelGrads(self.convOutputs[i][j],errTerms[0],self.getConnections()[0],self.kernels[i][j],padding=0,stride=1)
-                           self.kernels[i][j]=self.kernels[i][j]-penaltyfactor*kernelGrads
+                           kernelGrads=self.getKernelGrads(self.convOutputs[i][j],errTerms[0],self.getConnections()[1],self.kernels[i][j])
+                           self.kernels[i][j]=self.kernels[i][j]-penaltyfactor*kernelGrads[i][j]
             mse=sum(costli)/len(costli)
+            print("Loss:", mse)
     def getOutput(self):
         return self.output
     def test(self, data):
@@ -318,18 +344,49 @@ class Network:
         print(f"Accuracy: {correct/total*100}%")
 
 class Transformer:
-    def __init__(self, headCount,dModel):
-        self.ff=Network([1,2,1])
+    def __init__(self, dModel, vocabSize):
+        self.ff=Network([dModel,dModel*4,dModel])
         self.dModel=dModel
-        self.q=[np.uniform(-1*dModel,dModel) for i in range(dModel)]
-        self.k=[np.uniform(-1*dModel,dModel) for i in range(dModel)]
-        self.v=[np.uniform(-1*dModel,dModel) for i in range(dModel)]
+        self.vocabSize=vocabSize
+        self.q=[[np.uniform(-1*np.sqrt(6.0/(2*dModel)),np.sqrt(6.0/(2*dModel))) for i in range(dModel)] for j in range(dModel)]
+        self.k=[[np.uniform(-1*np.sqrt(6.0/(2*dModel)),np.sqrt(6.0/(2*dModel))) for i in range(dModel)] for j in range(dModel)]
+        self.v=[[np.uniform(-1*np.sqrt(6.0/(2*dModel)),np.sqrt(6.0/(2*dModel))) for i in range(dModel)] for j in range(dModel)]
+        self.vocabulary=[[np.uniform(-1,1) for i in range(dModel)] for j in range(vocabSize)]
     def softmax(self, index, data):
         return np.exp(data[index])/np.sum(np.exp(data))
-    def run(self, input, q, k, v, mask):
-        qT=np.matmul(input,q)
-        kT=np.matmul(input,k)
-        vT=np.matmul(input,v)
-        qkMatMul=np.matmul(qT,kT)
+    def run(self, input):
+        for i in range(len(input)):
+            for j in range(len(input[i])):
+                if j%2==0:
+                    encoding=np.sin(i/10000**(j/self.dModel))
+                else:
+                    encoding=np.cos(i/10000**(j/self.dModel))
+                input[i][j]+=encoding
+        qT=np.matmul(input,self.q)
+        kT=np.matmul(input,self.k)
+        vT=np.matmul(input,self.v)
+        qkMatMul=np.matmul(qT,np.transpose(kT))
         softmaxed=[self.softmax((qkMatMul)/np.sqrt(self.dModel),i) for i in range(len(qkMatMul))]
         qkv=np.matmul(softmaxed,vT)
+        ffMatrix=[self.ff.rerun(ins=qkvVector, update=True) for qkvVector in qkv]
+        sV=np.matmul(ffMatrix, np.transpose(self.vocabulary))
+        outputVector=[self.softmax(sV[len(sV)-1],i) for i in range(len(sV[len(sV)-1]))]
+        return outputVector
+    def train(self):
+        pass
+    def positionallyEncode(self, embeddedInput):
+        pass
+
+network=Network([768,64,64,10], convolutions=4, type='cnn', maintainDimensions=False)
+
+dataset=pickle.load(open("C:/Users/milla/Downloads/cifar-10-python (1)/cifar-10-batches-py/data_batch_1", "rb"), encoding='bytes')
+datasetReformatted=[]
+for i in range(len(dataset[b'data'])):
+    datasetReformatted.append([dataset[b'labels'][i],[]])
+    spliceCount=-1
+    for j in range(int(len(dataset[b'data'][i])/3)):
+        if j%32==0:
+            datasetReformatted[i][1].append([])
+            spliceCount+=1
+        datasetReformatted[i][1][spliceCount].append([dataset[b'data'][i][j],dataset[b'data'][i][j+1024],dataset[b'data'][i][j+2048]])
+network.train(datasetReformatted, 0.0005, epochs=4, rl=False)
