@@ -19,3 +19,6 @@ class PFC:
         pass
     def getGoalUpdates(self):
         pass
+    def train(self, actualState, predictedState):
+        pass
+    
